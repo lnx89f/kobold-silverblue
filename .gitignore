@@ -1,0 +1,24 @@
+# Build artifacts
+output/
+*.qcow2
+*.iso
+*.raw
+*.img
+*.sha256
+
+# Local tooling
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.log
+*~
+.DS_Store
+
+# Python/tool caches
+__pycache__/
+.pytest_cache/
