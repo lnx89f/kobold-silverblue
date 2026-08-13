@@ -1,0 +1,75 @@
+ARG INSTALLER_BASE="quay.io/fedora/fedora-bootc:44@sha256:204581d38a3395ac5f13fdcaf9d1b588f1adf48f131719134f37dfc9294e63d6"
+FROM ${INSTALLER_BASE}
+
+ARG PAYLOAD_IMAGE
+ARG TARGET_IMAGE
+ENV KOBOLD_PAYLOAD_IMAGE="${PAYLOAD_IMAGE}" \
+    KOBOLD_TARGET_IMAGE="${TARGET_IMAGE}"
+
+RUN dnf5 -y install \
+      anaconda anaconda-install-img-deps anaconda-dracut \
+      dracut-config-generic dracut-network net-tools \
+      grub2-efi-x64-cdboot grub2-pc-modules grub2-tools-extra shim-x64 \
+      plymouth default-fonts-core-sans default-fonts-other-sans \
+      google-noto-sans-cjk-fonts squashfs-tools xorriso isomd5sum \
+      podman python3 python3-libselinux jq && \
+    dnf5 clean all
+
+COPY iso/configure-installer.sh /usr/libexec/kobold-configure-installer
+COPY iso/kobold-installer.tmpfiles /usr/lib/tmpfiles.d/kobold-installer.conf
+COPY iso/kobold-installer.sysusers /usr/lib/sysusers.d/kobold-installer.conf
+COPY iso/iso.yaml /usr/lib/image-builder/bootc/iso.yaml
+RUN /usr/libexec/kobold-configure-installer
+
+# Follow the current upstream bootc-generic-iso Anaconda environment contract.
+RUN ln -sf /usr/lib/systemd/system/anaconda-shell@.service /usr/lib/systemd/system/autovt@.service && \
+    mkdir -p /usr/lib/systemd/logind.conf.d \
+             /etc/systemd/user/pipewire.service.d \
+             /etc/systemd/user/pipewire.socket.d && \
+    printf '[Login]\nReserveVT=2\n' >/usr/lib/systemd/logind.conf.d/kobold-anaconda.conf && \
+    printf '[Unit]\nConditionUser=\n' >/etc/systemd/user/pipewire.service.d/allowroot.conf && \
+    printf '[Unit]\nConditionUser=\n' >/etc/systemd/user/pipewire.socket.d/allowroot.conf && \
+    mkdir -p "$(realpath /root)"
+
+# Fedora 43+ bootable-container ISO tooling expects EFI material here.
+RUN mkdir -p /boot/efi /var/mnt && \
+    if compgen -G '/usr/lib/efi/*/*/EFI' >/dev/null; then cp -ra /usr/lib/efi/*/*/EFI /boot/efi/; fi
+
+# Build an installer-capable initramfs beside the single kernel.
+RUN kernel=$(kernel-install list --json pretty | jq -r '.[] | select(.has_kernel == true) | .version' | tee /tmp/kernels) && \
+    test "$(wc -l </tmp/kernels)" -eq 1 && \
+    DRACUT_NO_XATTR=1 dracut --force -v --zstd --reproducible --no-hostonly \
+      --add 'anaconda' "/usr/lib/modules/${kernel}/initramfs.img" "${kernel}" && \
+    rm -f /tmp/kernels
+
+# Remove composition-only state. /boot is intentionally populated above because
+# image-builder consumes this image as a bootable Anaconda environment.
+RUN rm -rf \
+      /run/cockpit \
+      /run/dnf \
+      /run/dnsconfd \
+      /run/selinux-policy \
+      /run/unbound \
+      /tmp/* \
+      /var/cache/* \
+      /var/lib/dnf \
+      /var/log/dnf5.log*
+
+# Keep bootc's transient layer-import file off the small live RAM overlay. The
+# wrapper affects only Anaconda's install-to-filesystem call and passes every
+# other bootc command through unchanged.
+COPY iso/bootc-installer-wrapper.sh /usr/libexec/kobold-bootc-installer
+RUN mv /usr/bin/bootc /usr/libexec/kobold-bootc.real && \
+    ln -s /usr/libexec/kobold-bootc-installer /usr/bin/bootc
+
+# image-builder currently receives the installer root through containers/storage,
+# whose overlay mount has a container_file_t mount context.  Preserve every other
+# source xattr, but synthesize security.selinux entries from the installer policy
+# while mksquashfs creates the read-only live filesystem.  Keep this late in the
+# file so changes to the adapter do not invalidate the expensive initramfs layer.
+COPY iso/mksquashfs-selinux.py /usr/libexec/kobold-mksquashfs-selinux
+RUN mv /usr/bin/mksquashfs /usr/libexec/kobold-mksquashfs.real && \
+    ln -s /usr/libexec/kobold-mksquashfs-selinux /usr/bin/mksquashfs
+
+RUN bootc container lint --fatal-warnings --skip nonempty-boot
+CMD ["/sbin/init"]

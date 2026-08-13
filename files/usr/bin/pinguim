@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ok() { printf '[OK] %s\n' "$*"; }
+warn() { printf '[WARN] %s\n' "$*"; }
+
+[[ "${1:-}" == doctor && $# -eq 1 ]] || { echo 'Usage: pinguim doctor' >&2; exit 2; }
+printf 'Pinguim doctor — Kobold workstation diagnostics\n\n'
+
+grep -Fqx 'ID=fedora' /usr/lib/os-release && ok 'Fedora upstream identity' || warn 'Fedora identity mismatch'
+grep -Fqx 'NAME="Kobold"' /etc/os-release && ok 'Kobold deployment identity' || warn 'Kobold identity mismatch'
+bootc status >/dev/null 2>&1 && ok 'bootc deployment available' || warn 'bootc status failed'
+[[ "$(getenforce 2>/dev/null || :)" == Enforcing ]] && ok 'SELinux Enforcing' || warn 'SELinux not Enforcing'
+
+if systemctl is-active --quiet firewalld; then
+  zone=$(firewall-cmd --get-default-zone 2>/dev/null || echo unknown)
+  [[ "$zone" == drop ]] && ok 'firewall default zone: drop' || warn "firewall default zone: $zone"
+else
+  warn 'firewalld inactive'
+fi
+
+systemctl is-active --quiet tuned && ok "TuneD active: $(tuned-adm active 2>/dev/null | sed 's/^Current active profile: //' || :)" || warn 'TuneD inactive'
+systemctl is-active --quiet tuned-ppd && ok 'GNOME power profiles backed by tuned-ppd' || warn 'tuned-ppd inactive'
+grep -Fqx 'wifi.powersave=3' /etc/NetworkManager/conf.d/20-kobold-privacy.conf && ok 'Wi-Fi power saving enabled' || warn 'Wi-Fi power policy mismatch'
+[[ ! -e /etc/systemd/zram-generator.conf ]] && ok 'Fedora ZRAM defaults retained' || warn 'custom ZRAM override present'
+
+grep -Fqx 'AutoEnable=false' /etc/bluetooth/main.conf && ok 'Bluetooth defaults off' || warn 'Bluetooth default policy mismatch'
+command -v bluetoothctl >/dev/null && ok 'Bluetooth stack available' || warn 'Bluetooth stack missing'
+command -v fprintd-list >/dev/null && ok 'fingerprint stack available' || warn 'fingerprint stack missing'
+
+systemctl is-active --quiet systemd-resolved && ok 'systemd-resolved active' || warn 'systemd-resolved inactive'
+resolvectl status >/dev/null 2>&1 && ok 'resolver status available' || warn 'resolver status unavailable'
+grep -Fq '1.1.1.1#one.one.one.one' /etc/systemd/resolved.conf.d/60-kobold.conf && ok 'Cloudflare fallback configured' || warn 'Cloudflare fallback missing'
+
+if podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null | grep -qx true; then
+  ok 'rootless Podman functional'
+else
+  warn 'rootless Podman not initialized/functional for this user'
+fi
+systemctl is-enabled --quiet podman.socket 2>/dev/null && warn 'rootful podman.socket enabled' || ok 'rootful podman.socket disabled/masked'
+command -v distrobox >/dev/null && ok 'Distrobox available' || warn 'Distrobox missing'
+command -v toolbox >/dev/null && ok 'Toolbx available' || warn 'Toolbx missing'
+[[ -e /dev/kvm ]] && ok 'KVM available' || warn 'KVM unavailable in this hardware/session'
+command -v virsh >/dev/null && ok 'libvirt client available' || warn 'libvirt missing'
+
+rpm -q code >/dev/null 2>&1 && ok 'Microsoft VS Code installed' || warn 'VS Code missing'
+rpm -q --qf '%{VENDOR}\n' code 2>/dev/null | grep -Fqx 'Microsoft Corporation' && ok 'VS Code vendor verified' || warn 'VS Code vendor mismatch'
+flatpak remote-list --system --columns=name 2>/dev/null | grep -qx flathub && ok 'Flathub configured' || warn 'Flathub not active yet'
+command -v trivy >/dev/null && ok 'Trivy available' || warn 'Trivy missing'
+command -v lynis >/dev/null && ok 'Lynis available' || warn 'Lynis missing'
+
+for forbidden in openssh-server docker docker-cli docker-compose docker-ce moby-engine podman-docker podman-compose; do
+  rpm -q "$forbidden" >/dev/null 2>&1 && warn "forbidden package present: $forbidden"
+done
+command -v brew >/dev/null && warn 'Homebrew present' || ok 'no Homebrew'
+rpm -qa | grep -Eiq '^rpmfusion' && warn 'RPM Fusion package present' || ok 'no RPM Fusion packages'

@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+build_mode=0
+[[ "${1:-}" == --build ]] && build_mode=1
+fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
+
+# Identity
+grep -Fqx 'ID=fedora' /usr/lib/os-release || fail 'Fedora upstream identity missing'
+grep -Fqx 'ID=fedora' /etc/os-release || fail 'Fedora compatibility ID missing'
+grep -Fqx 'VARIANT_ID=silverblue' /etc/os-release || fail 'Silverblue variant missing'
+grep -Fqx 'NAME="Kobold"' /etc/os-release || fail 'Kobold display name missing'
+grep -Fqx 'PRETTY_NAME="Kobold 44 (Fedora Silverblue)"' /etc/os-release || fail 'Kobold pretty name missing'
+grep -Fqx 'LOGO=kobold' /etc/os-release || fail 'Kobold logo identity missing'
+
+# Required packages
+rpm -q \
+  gnome-shell gnome-control-center gnome-initial-setup nautilus ptyxis gnome-text-editor loupe \
+  gnome-calculator gnome-disk-utility niri code \
+  git git-lfs gh btop ripgrep fd-find bat fzf jq curl rsync \
+  smartmontools nvme-cli lm_sensors pciutils usbutils ethtool trivy lynis \
+  podman buildah skopeo toolbox distrobox podlet passt slirp4netns fuse-overlayfs shadow-utils-subid \
+  qemu-kvm libvirt-daemon-kvm virt-manager \
+  firewalld tuned tuned-ppd flatpak openssh-clients >/dev/null || fail 'required package missing'
+rpm -q --qf '%{VENDOR}\n' code | grep -Fqx 'Microsoft Corporation' || fail 'VS Code vendor mismatch'
+for unit in \
+  virtqemud.service virtnetworkd.service virtstoraged.service \
+  virtinterfaced.service virtnodedevd.service virtnwfilterd.service \
+  virtsecretd.service virtproxyd.service; do
+  ! systemctl is-enabled --quiet "$unit" || fail "modular libvirt service enabled at boot: $unit"
+done
+
+# Forbidden packages/policies
+for package in \
+  firefox gnome-software openssh-server \
+  docker docker-cli docker-compose docker-ce docker-ce-cli moby-engine \
+  podman-docker podman-compose linuxbrew homebrew \
+  fedora-workstation-repositories fedora-third-party \
+  gnome-remote-desktop gnome-user-share rygel ModemManager avahi cups mcelog; do
+  ! rpm -q "$package" >/dev/null 2>&1 || fail "forbidden package: $package"
+done
+! rpm -qa | grep -Eiq '^rpmfusion' || fail 'RPM Fusion package present'
+! test -e /etc/systemd/zram-generator.conf || fail 'custom ZRAM policy present'
+! grep -Rqs 'wifi.powersave=2' /etc/NetworkManager/conf.d 2>/dev/null || fail 'Wi-Fi powersave disabled'
+! grep -Rqs 'snd_hda_intel power_save=0' /etc/modprobe.d /usr/lib/modprobe.d 2>/dev/null || fail 'audio power saving disabled'
+! grep -Rqs 'vm.swappiness = 150' /etc/sysctl.d /usr/lib/sysctl.d 2>/dev/null || fail 'alpha memory tuning present'
+
+# Security/network/tuning policy exists exactly where expected.
+for line in \
+  'kernel.kptr_restrict = 2' \
+  'kernel.dmesg_restrict = 1' \
+  'kernel.yama.ptrace_scope = 1' \
+  'kernel.kexec_load_disabled = 1' \
+  'kernel.unprivileged_bpf_disabled = 1' \
+  'net.ipv6.conf.all.accept_source_route = -1'; do
+  grep -Fqx "$line" /etc/sysctl.d/60-kobold-security.conf || fail "security policy missing: $line"
+done
+grep -Fqx 'wifi.powersave=3' /etc/NetworkManager/conf.d/20-kobold-privacy.conf || fail 'Wi-Fi powersave policy missing'
+grep -Fqx 'wifi.cloned-mac-address=stable-ssid' /etc/NetworkManager/conf.d/20-kobold-privacy.conf || fail 'Wi-Fi MAC privacy missing'
+grep -Fqx 'FallbackDNS=1.1.1.1#one.one.one.one 1.0.0.1#one.one.one.one 2606:4700:4700::1111#one.one.one.one 2606:4700:4700::1001#one.one.one.one' /etc/systemd/resolved.conf.d/60-kobold.conf || fail 'Cloudflare fallback DNS missing'
+grep -Fqx 'include=balanced-battery' /etc/tuned/profiles/kobold-powersave/tuned.conf || fail 'Kobold TuneD profile missing'
+! grep -Fq '[script]' /etc/tuned/profiles/kobold-powersave/tuned.conf || fail 'power-saver must not force TuneD USB autosuspend script'
+
+# Desktop/branding/Flatpak
+[[ -s /usr/share/backgrounds/kobold/kobold-wallpaper.jpg ]] || fail 'wallpaper missing'
+[[ -s /usr/share/kobold/branding/kobold-gdm-logo.png ]] || fail 'GDM logo missing'
+[[ -s /usr/share/icons/hicolor/256x256/apps/kobold.png ]] || fail 'Kobold icon missing'
+grep -Fqx 'system-db:gdm' /etc/dconf/profile/gdm || fail 'GDM dconf profile missing'
+grep -Fq "logo='/usr/share/kobold/branding/kobold-gdm-logo.png'" /etc/dconf/db/gdm.d/01-kobold-logo || fail 'GDM logo dconf default missing'
+[[ -s /etc/dconf/db/gdm ]] || fail 'GDM dconf database missing'
+[[ -s /etc/flatpak/remotes.d/flathub.flatpakrepo ]] || fail 'Flathub remote descriptor missing'
+[[ ! -e /usr/share/flatpak/preinstall.d/kobold.preinstall ]] || fail 'Kobold must not preinstall Firefox'
+[[ ! -e /usr/lib/systemd/system/kobold-flatpak-preinstall.service ]] || fail 'legacy Kobold Flatpak preinstall service present'
+[[ "$(systemctl is-enabled flatpak-add-fedora-repos.service 2>/dev/null)" == masked ]] || fail 'Fedora Flatpak remote auto-add is not masked'
+if systemctl list-unit-files flatpak-preinstall.service --no-legend 2>/dev/null | grep -q '^flatpak-preinstall.service'; then
+  [[ "$(systemctl is-enabled flatpak-preinstall.service 2>/dev/null)" == masked ]] || fail 'Flatpak OS preinstall service is not masked'
+fi
+systemctl is-enabled --quiet kobold-firewall-first-boot.service || fail 'first-boot firewall reconciliation is not enabled'
+[[ ! -e /etc/niri/config.kdl ]] || fail 'Kobold must not impose a Niri config'
+
+# No credentials or persistent third-party package source.
+root_hash=$(getent shadow root | cut -d: -f2)
+[[ "$root_hash" == '!'* || "$root_hash" == '*'* ]] || fail 'root is unlocked'
+! awk -F: '$3 >= 1000 && $3 < 65534 { found=1 } END { exit found ? 0 : 1 }' /etc/passwd || fail 'human user embedded'
+! find /etc/ssh /root /home -xdev -type f \( -name 'ssh_host_*' -o -name authorized_keys -o -name 'id_*' \) -print -quit 2>/dev/null | grep -q . || fail 'SSH credential embedded'
+! find /etc/NetworkManager/system-connections /root /home -xdev -type f \( -name '*.nmconnection' -o -name auth.json -o -name hosts.yml \) -print -quit 2>/dev/null | grep -q . || fail 'personal credential embedded'
+while IFS= read -r repo; do
+  [[ -n "$repo" ]] || continue
+  owner=$(rpm -qf --qf '%{NAME}' "$repo" 2>/dev/null) || fail "unowned RPM repository file: $repo"
+  case "$owner" in
+    fedora-repos|fedora-repos-archive) ;;
+    *) fail "repository file not owned by allowed Fedora repo package: $repo (owner=$owner)" ;;
+  esac
+done < <(find /etc/yum.repos.d -maxdepth 1 -type f -name '*.repo' -print 2>/dev/null | sort)
+for forbidden_repo in google-chrome.repo rpmfusion-nonfree-nvidia-driver.repo rpmfusion-nonfree-steam.repo _copr:copr.fedorainfracloud.org:phracek:PyCharm.repo; do
+  [[ ! -e "/etc/yum.repos.d/$forbidden_repo" ]] || fail "forbidden workstation repository metadata: $forbidden_repo"
+done
+
+if ((build_mode == 0)); then
+  [[ "$(getenforce)" == Enforcing ]] || fail 'SELinux is not enforcing'
+  [[ "$(firewall-cmd --get-default-zone)" == drop ]] || fail 'firewall default zone is not drop'
+  for query in services ports protocols source-ports forward-ports rich-rules; do
+    [[ -z "$(firewall-cmd --zone=drop "--list-${query}" | xargs)" ]] || fail "firewall drop-zone opening: $query"
+  done
+  systemctl is-active --quiet firewalld || fail 'firewalld inactive'
+  systemctl is-active --quiet tuned || fail 'TuneD inactive'
+  systemctl is-active --quiet systemd-resolved || fail 'systemd-resolved inactive'
+  systemctl is-enabled --quiet podman.socket && fail 'rootful podman.socket enabled'
+fi
+
+printf '[OK] Kobold image invariants\n'

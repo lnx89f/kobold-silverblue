@@ -1,0 +1,16 @@
+[org.gnome.desktop.background]
+picture-uri='file:///usr/share/backgrounds/kobold/kobold-wallpaper.jpg'
+picture-uri-dark='file:///usr/share/backgrounds/kobold/kobold-wallpaper.jpg'
+picture-options='zoom'
+primary-color='#07150f'
+secondary-color='#07150f'
+
+[org.gnome.desktop.screensaver]
+picture-uri='file:///usr/share/backgrounds/kobold/kobold-wallpaper.jpg'
+picture-options='zoom'
+primary-color='#07150f'
+secondary-color='#07150f'
+
+[org.gnome.system.location]
+enabled=false
+

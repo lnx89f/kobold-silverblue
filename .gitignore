@@ -1,24 +1,12 @@
-# Build artifacts
-output/
+/output/
 *.qcow2
-*.iso
 *.raw
-*.img
-*.sha256
-
-# Local tooling
-.env
-.env.*
-!.env.example
-.vscode/
-.idea/
-
-# Temporary files
-*.tmp
+*.iso
+*.iso-CHECKSUM
+*.manifest.json
 *.log
-*~
-.DS_Store
+.env
 
-# Python/tool caches
+# Python cache
 __pycache__/
-.pytest_cache/
+*.py[cod]

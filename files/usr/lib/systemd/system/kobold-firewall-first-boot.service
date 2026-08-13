@@ -1,0 +1,15 @@
+[Unit]
+Description=Restore the Kobold default firewall policy after installation
+ConditionPathExists=!/var/lib/kobold/firewall-default-applied
+After=local-fs.target
+Before=firewalld.service NetworkManager.service
+
+[Service]
+Type=oneshot
+StateDirectory=kobold
+StateDirectoryMode=0700
+ExecStart=/usr/libexec/kobold-configure-firewall
+ExecStartPost=/usr/bin/touch /var/lib/kobold/firewall-default-applied
+
+[Install]
+WantedBy=multi-user.target

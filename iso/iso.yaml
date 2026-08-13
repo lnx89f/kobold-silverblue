@@ -1,0 +1,8 @@
+label: "Kobold-Installer"
+grub2:
+  default: 0
+  timeout: 10
+  entries:
+    - name: "Install Kobold"
+      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Kobold-Installer inst.geoloc=0 inst.graphical rhgb quiet"
+      initrd: "/images/pxeboot/initrd.img"

@@ -1,0 +1,4 @@
+# Kobold Lynis custom profile
+#
+# Keep upstream Lynis audit coverage intact.
+# Project-specific suppressions must be explicitly justified before being added.

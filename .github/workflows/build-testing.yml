@@ -1,0 +1,134 @@
+name: Build Kobold testing
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: testing-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Free runner disk space
+        uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6
+
+      - name: Static checks
+        run: ./tests/static-checks.sh
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.6.3
+
+      - name: Verify pinned Fedora Silverblue base
+        run: ./ci/verify-fedora-base.sh Containerfile
+
+      - name: Image metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="44.$(date -u +%Y%m%d).${GITHUB_SHA::12}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build source image
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          sudo podman build --pull=always --no-cache --format oci \
+            --build-arg "VERSION=${VERSION}" \
+            --build-arg "SOURCE_REVISION=${GITHUB_SHA}" \
+            -t localhost/kobold:source .
+
+      - name: Validate source image
+        run: |
+          sudo podman run --rm --entrypoint /usr/libexec/kobold-image-invariants localhost/kobold:source --build
+          sudo podman run --rm --privileged --entrypoint bootc localhost/kobold:source container lint --fatal-warnings
+
+      - name: Rechunk for efficient bootc updates
+        run: |
+          # Use the already-built, verified Kobold source image as the tool container.
+          # This avoids introducing another privileged, unpinned build image into the supply chain.
+          sudo podman run --rm --privileged \
+            --volume /var/lib/containers:/var/lib/containers \
+            --entrypoint /usr/bin/rpm-ostree \
+            localhost/kobold:source \
+            compose build-chunked-oci --max-layers 127 --format-version 2 --bootc \
+            --from localhost/kobold:source \
+            --output containers-storage:localhost/kobold:testing
+
+      - name: Validate rechunked image
+        run: |
+          sudo podman run --rm --entrypoint /usr/libexec/kobold-image-invariants localhost/kobold:testing --build
+          sudo podman run --rm --privileged --entrypoint bootc localhost/kobold:testing container lint --fatal-warnings
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | sudo podman login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Push immutable and testing tags
+        id: push
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          set -euo pipefail
+          sha_tag="testing-${GITHUB_SHA::12}"
+          date_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA::12}"
+          for tag in "$sha_tag" "$date_tag" testing; do
+            sudo podman tag localhost/kobold:testing "${IMAGE}:${tag}"
+          done
+          sudo podman push --digestfile /tmp/kobold-digest "${IMAGE}:${sha_tag}"
+          sudo podman push "${IMAGE}:${date_tag}"
+          sudo podman push "${IMAGE}:testing"
+          digest=$(cat /tmp/kobold-digest)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${sha_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign exact image digest with GitHub OIDC
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Summary
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo '### Kobold testing published'
+            echo
+            echo "- Image: \`${IMAGE}:testing\`"
+            echo "- Digest: \`${DIGEST}\`"
+            echo "- Source: \`${GITHUB_SHA}\`"
+            echo '- Signature: keyless GitHub OIDC'
+            echo '- Provenance: GitHub artifact attestation + registry attestation'
+          } >> "$GITHUB_STEP_SUMMARY"

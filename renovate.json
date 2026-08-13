@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "dependencyDashboard": true,
+  "docker": { "pinDigests": true },
+  "packageRules": [
+    {
+      "description": "Track only the Fedora Silverblue 44 content digest",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["quay.io/fedora/fedora-silverblue"],
+      "matchCurrentVersion": ["44"],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
+      "description": "Do not cross Fedora major versions automatically",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["quay.io/fedora/fedora-silverblue"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
+    }
+  ]
+}

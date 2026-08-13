@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+unit_exists() {
+  systemctl list-unit-files "$1" --no-legend 2>/dev/null |
+    awk -v expected="$1" '$1 == expected { found=1 } END { exit !found }'
+}
+enable_if_present() { unit_exists "$1" && systemctl enable "$1" || :; }
+disable_if_present() { unit_exists "$1" && systemctl disable "$1" || :; }
+mask_if_present() { unit_exists "$1" && systemctl mask "$1" || :; }
+
+# Predictable image updates: never silently fetch/apply/reboot the workstation.
+for unit in \
+  bootc-fetch-apply-updates.timer bootc-fetch-apply-updates.service \
+  rpm-ostreed-automatic.timer rpm-ostreed-automatic.service; do
+  mask_if_present "$unit"
+done
+
+# Reduce unsolicited network/contact surface.
+for unit in \
+  rpm-ostree-countme.service rpm-ostree-countme.timer \
+  flatpak-add-fedora-repos.service \
+  geoclue.service avahi-daemon.service avahi-daemon.socket \
+  cups.service cups.socket cups.path \
+  ModemManager.service gnome-remote-desktop.service; do
+  mask_if_present "$unit"
+done
+
+# TuneD replaces power-profiles-daemon as the GNOME power-profile backend.
+mask_if_present power-profiles-daemon.service
+enable_if_present tuned.service
+enable_if_present tuned-ppd.service
+enable_if_present firewalld.service
+enable_if_present kobold-firewall-first-boot.service
+enable_if_present systemd-resolved.service
+enable_if_present fstrim.timer
+
+# Old monolithic libvirt daemon is off; modular drivers wake on demand.
+for unit in libvirtd.service libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket; do
+  disable_if_present "$unit"
+done
+for unit in \
+  virtqemud.service virtnetworkd.service virtstoraged.service \
+  virtinterfaced.service virtnodedevd.service virtnwfilterd.service \
+  virtsecretd.service virtproxyd.service virtlogd.service virtlockd.service; do
+  disable_if_present "$unit"
+done
+for unit in \
+  virtqemud.socket virtqemud-ro.socket \
+  virtnetworkd.socket virtnetworkd-ro.socket \
+  virtstoraged.socket virtstoraged-ro.socket \
+  virtlogd.socket virtlockd.socket; do
+  enable_if_present "$unit"
+done
+
+# Rootful Podman API is not an always-available host service.
+disable_if_present podman.socket
+mask_if_present podman.socket

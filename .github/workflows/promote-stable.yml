@@ -1,0 +1,97 @@
+name: Promote Kobold stable
+
+on:
+  schedule:
+    - cron: '23 09 1,15 * *'
+  workflow_dispatch:
+    inputs:
+      testing_tag:
+        description: Signed testing tag to promote
+        required: true
+        default: testing
+        type: string
+
+concurrency:
+  group: promote-stable
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Resolve metadata
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.testing_tag }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="${INPUT_TAG:-testing}"
+          [[ "$tag" =~ ^testing([._-][A-Za-z0-9._-]+)?$ ]]
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.6.3
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          install -d -m 0700 /tmp/kobold-auth
+          printf '%s' "$GHCR_TOKEN" | podman login ghcr.io --authfile /tmp/kobold-auth/auth.json --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Resolve and verify signed testing digest
+        id: verify
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --authfile /tmp/kobold-auth/auth.json --format '{{.Digest}}' "docker://${IMAGE}:${TAG}")
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-testing.yml@refs/heads/${DEFAULT_BRANCH}"
+          cosign verify \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            "${IMAGE}@${digest}" >/dev/null
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Promote exact digest without rebuild
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.verify.outputs.digest }}
+        run: |
+          set -euo pipefail
+          date_tag="stable-$(date -u +%Y%m%d)"
+          for tag in stable "$date_tag"; do
+            skopeo copy --all --authfile /tmp/kobold-auth/auth.json \
+              "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:${tag}"
+          done
+
+      - name: Sign stable digest
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.verify.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Summary
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.verify.outputs.digest }}
+        run: |
+          {
+            echo '### Kobold stable promoted'
+            echo
+            echo "- Image: \`${IMAGE}:stable\`"
+            echo "- Exact existing digest: \`${DIGEST}\`"
+            echo '- No rebuild occurred during promotion.'
+          } >> "$GITHUB_STEP_SUMMARY"

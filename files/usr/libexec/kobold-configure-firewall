@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+command -v firewall-offline-cmd >/dev/null
+if [[ "$(firewall-offline-cmd --get-default-zone)" != drop ]]; then
+  firewall-offline-cmd --set-default-zone=drop
+fi
+
+for query_remove in \
+  'services:service-from-zone' 'ports:port' 'protocols:protocol' \
+  'source-ports:source-port' 'forward-ports:forward-port'; do
+  query=${query_remove%%:*}
+  remove=${query_remove##*:}
+  while read -r value; do
+    [[ -n "$value" ]] && firewall-offline-cmd --zone=drop "--remove-${remove}=${value}"
+  done < <(firewall-offline-cmd --zone=drop "--list-${query}" | tr ' ' '\n')
+done
+
+while IFS= read -r rule; do
+  [[ -n "$rule" ]] && firewall-offline-cmd --zone=drop --remove-rich-rule="$rule"
+done < <(firewall-offline-cmd --zone=drop --list-rich-rules)
+
+if firewall-offline-cmd --zone=drop --query-masquerade >/dev/null 2>&1; then
+  firewall-offline-cmd --zone=drop --remove-masquerade
+fi
+firewall-offline-cmd --zone=drop --remove-forward 2>/dev/null || :
+
+for query in services ports protocols source-ports forward-ports rich-rules; do
+  [[ -z "$(firewall-offline-cmd --zone=drop "--list-${query}" | xargs)" ]] || {
+    printf 'Residual opening in drop zone: %s\n' "$query" >&2
+    exit 1
+  }
+done
+! firewall-offline-cmd --zone=drop --query-masquerade >/dev/null 2>&1
+! firewall-offline-cmd --zone=drop --query-forward >/dev/null 2>&1

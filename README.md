@@ -1,64 +1,56 @@
-# Kobold Silverblue
+# Kobold
 
-Kobold is a personal Fedora Silverblue bootc workstation focused on minimalism, security, efficiency, and Dev/DevSecOps workflows.
+Kobold is a personal, opinionated **Fedora Silverblue workstation image**. It keeps Fedora as the security and operating-system upstream while making a controlled set of decisions for hardening, privacy, thermal/battery tuning, containers, virtualization, minimal applications and branding.
 
-## Status
+It is intentionally not a new distribution, does not replace Fedora's kernel or SELinux policies, and does not inherit Bluefin/UBlue runtime layers. Bluefin and Finpilot are engineering references. The base is the Fedora-published Silverblue 44 bootable OCI from `quay.io/fedora/fedora-silverblue`, pinned by digest. Kobold deliberately does not use the separate `fedora-ostree-desktops` SIG stream as its base.
 
-**Design / pre-build.** No installable Kobold image is published yet.
+## What is different from Silverblue
 
-## Architecture
+- stricter inbound firewall (`drop`, no default openings)
+- additional kernel/network hardening for a normal developer workstation
+- SELinux Enforcing as a tested invariant
+- no SSH server, printer daemon, Avahi discovery, ModemManager, GNOME remote desktop/user sharing or automatic connectivity probing
+- location disabled and GeoClue activation blocked
+- privacy-oriented NetworkManager defaults and Cloudflare fallback DNS with opportunistic DoT
+- TuneD policy focused on cool/efficient laptop operation without USB autosuspend
+- rootless Podman, modular libvirt/QEMU/KVM
+- official Microsoft VS Code RPM
+- Flathub configured; Firefox is installed manually when desired; no GNOME Software
+- Dev/DevSecOps CLI includes Trivy, Lynis and focused hardware diagnostics
+- GNOME plus Niri (Niri ships without a Kobold user config)
+- Fedora Silverblue native language/localization coverage; installer-selected locale
+- Kobold wallpaper, icons, GDM logo and OS presentation while preserving Fedora/Silverblue compatibility identity
+- package-aware removal of Fedora Workstation third-party opt-in repositories
+- signed testing/stable OCI release workflow and a direct-bootc ISO path
 
-Kobold is based directly on the official Fedora Silverblue image. Finpilot may be used only as build/CI scaffolding where useful; Kobold does not use Bluefin as its runtime base and does not depend on Universal Blue userland components.
+Read `KOBOLD-SPEC.md` before changing the build. Every nontrivial change should have a reason and an invariant/test.
 
-```text
-Fedora Silverblue
-      ↓
-Finpilot / build & CI scaffolding
-      ↓
-Kobold
+## Local checks
+
+```bash
+./tests/static-checks.sh
+sudo podman build --format oci -t localhost/kobold:dev .
+./tests/image-invariants.sh localhost/kobold:dev
 ```
 
-## Goals
+For a runtime deployment:
 
-- Minimal GNOME workstation with optional Niri session.
-- SELinux enforcing and hardened defaults.
-- Firewalld with a closed-by-default inbound policy.
-- Podman rootless + Distrobox.
-- QEMU/KVM + libvirt + virt-manager.
-- Official Microsoft Visual Studio Code RPM.
-- Conservative power and thermal tuning validated on the target hardware.
-- Flatpak-first desktop applications through GNOME Software.
-- Image-based updates through bootc.
-- Controlled `testing` → `stable` promotion, targeting roughly 14-day stable releases with an emergency security promotion path.
-- No Bluefin runtime, Homebrew, Docker, RPM Fusion, or custom branding.
+```bash
+pinguim doctor
+sudo bootc status
+```
 
-## Default desktop applications
+Kobold intentionally does not enable unattended bootc reboots. Update when desired with the normal bootc workflow after reviewing the published stable image.
 
-Kobold intends to keep only a small core set in the host image:
+For ISO work, the validated Kobold OCI and the Fedora-derived live installer are separate inputs. Build them with `iso/build-installer.sh` and `iso/build-iso.sh`; the unified Image Builder `bootc-generic-iso` flow embeds the Kobold payload for direct Anaconda installation. See `docs/ISO.md` and complete `tests/iso-acceptance.md` before treating an ISO as validated.
 
-- Nautilus
-- GNOME Software
-- Ptyxis
-- GNOME Text Editor
-- Loupe
-- GNOME Calculator
-- GNOME Disks
-- Visual Studio Code (official Microsoft RPM)
+## Repository layout
 
-Firefox and other desktop applications are intended to be installed manually through GNOME Software / Flatpak.
-
-## Development model
-
-The host provides the stable workstation substrate. Project-specific toolchains should normally live in Distrobox, Podman containers, or virtual machines instead of being layered into the host image.
-
-## Technical specification
-
-See [`CODEX.md`](CODEX.md) for the current implementation specification, validation rules, release model, and constraints.
-
-## Source projects
-
-During implementation, the local Pinguim and Akatsuki repositories are used as engineering references for previously validated configuration and testing patterns. Kobold is a new project and is not a rebrand of either one.
-
-## License
-
-Not selected yet.
+- `Containerfile` — image composition
+- `build/` — deterministic build stages
+- `files/` — configuration copied into the image
+- `KOBOLD-SPEC.md` — source of truth for design/policy
+- `docs/` — architecture, security, tuning, network, update and ISO notes
+- `tests/` — static, image and clean-install acceptance checks
+- `.github/workflows/` — validate, publish testing, promote stable and build ISO
+- `iso/` — separate Fedora-derived installer environment and unified Image Builder scripts; it installs the Kobold payload directly
