@@ -1,4 +1,4 @@
-ARG BASE_IMAGE="quay.io/fedora/fedora-silverblue:44@sha256:7ef2aa50a10311ecbc80dd91d7858be2e7282d62578bc8d7ec9782ca42fe1ae4"
+ARG BASE_IMAGE="quay.io/fedora/fedora-silverblue:44@sha256:cd325557517fabdca2da8049565c757608e2bccb2a58ec1f65906fb601c17bf7"
 
 FROM scratch AS source
 COPY build /build
