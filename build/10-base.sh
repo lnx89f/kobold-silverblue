@@ -9,7 +9,9 @@ set -euo pipefail
 # package-aware: do not delete RPM-owned .repo files by hand.
 remove_base_package_if_installed() {
   local package=$1
-  rpm -q "$package" >/dev/null 2>&1 && dnf5 -y remove "$package" || :
+  if rpm -q "$package" >/dev/null 2>&1; then
+    dnf5 -y --setopt=install_weak_deps=False remove "$package"
+  fi
 }
 remove_base_package_if_installed fedora-workstation-repositories
 remove_base_package_if_installed fedora-third-party

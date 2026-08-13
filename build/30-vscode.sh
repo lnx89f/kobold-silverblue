@@ -30,5 +30,5 @@ gpgcheck=1
 gpgkey=https://packages.microsoft.com/keys/microsoft.asc
 EOF
 
-dnf5 -y install code
+dnf5 -y --setopt=install_weak_deps=False install code
 rpm -q --qf '%{VENDOR}\n' code | grep -Fqx 'Microsoft Corporation'

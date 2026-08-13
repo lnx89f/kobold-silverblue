@@ -6,7 +6,7 @@ remove_if_installed() {
   for p in "$@"; do
     rpm -q "$p" >/dev/null 2>&1 && installed+=("$p")
   done
-  ((${#installed[@]})) && dnf5 -y remove "${installed[@]}"
+  ((${#installed[@]})) && dnf5 -y --setopt=install_weak_deps=False remove "${installed[@]}"
   return 0
 }
 
@@ -31,7 +31,7 @@ remove_if_installed \
   mcelog
 
 # Explicit host package set. Toolchains/SDKs are intentionally not here.
-dnf5 -y install \
+dnf5 -y --setopt=install_weak_deps=False install \
   ca-certificates gnupg2 openssh-clients \
   flatpak \
   nautilus ptyxis gnome-text-editor loupe gnome-calculator gnome-disk-utility gnome-initial-setup \
@@ -47,7 +47,7 @@ dnf5 -y install \
   powertop powerstat lm_sensors pciutils usbutils
 
 # Key hardware/security support remains Fedora-native.
-dnf5 -y install fwupd fprintd udisks2 upower bluez
+dnf5 -y --setopt=install_weak_deps=False install fwupd fprintd udisks2 upower bluez
 
 # Assert critical desktop foundations survived removals.
 rpm -q gnome-shell gnome-session gnome-control-center NetworkManager systemd >/dev/null

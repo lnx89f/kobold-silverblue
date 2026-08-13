@@ -8,7 +8,6 @@ FROM ${BASE_IMAGE}
 ARG VERSION="dev"
 ARG SOURCE_REVISION="unknown"
 
-RUN dnf5 config-manager setopt keepcache=1 install_weak_deps=0
 
 RUN --mount=type=bind,from=source,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache/libdnf5 \
