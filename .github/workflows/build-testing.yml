@@ -84,7 +84,13 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s' "$GHCR_TOKEN" | sudo podman login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | sudo podman login ghcr.io \
+            --username "$GITHUB_ACTOR" \
+            --password-stdin
+          printf '%s' "$GHCR_TOKEN" | podman login ghcr.io \
+            --username "$GITHUB_ACTOR" \
+            --password-stdin
 
       - name: Push immutable and testing tags
         id: push

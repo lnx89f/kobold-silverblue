@@ -1,6 +1,6 @@
 # SHA-256 checksums for tracked source artifacts. This file intentionally excludes itself.
 05e1556ff91ab16c22211325f81d51077dcb58c3b9db0aebc345cc5318fc6686  ./.github/workflows/build-iso.yml
-c7081fccaf8c72feaf62a6e5b88767c1ea8c7839170def46fe3b96c744d84e31  ./.github/workflows/build-testing.yml
+e4bb24cd0b5f49f5261babd180c284d5263225f1b3afc2d731d3ae57a02a1111  ./.github/workflows/build-testing.yml
 a4b92ba10c0d414007e343abda865958088cfb42006cb990afe103299eb7d6ce  ./.github/workflows/promote-stable.yml
 240d42edca8021ed268679f9c9e894202b5f77944ceb98d8b15388af163e8e01  ./.github/workflows/validate.yml
 c176e019e9d57d42260c8daa7871613cb7b6ebb9f9fe55fb9060038e0652ff9b  ./.gitignore
